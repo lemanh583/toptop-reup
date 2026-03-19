@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from backend.api.routes import download
+from backend.api.routes import download, transform
 
 app = FastAPI(
     title="Auto-Reup TikTok Admin API", 
@@ -9,6 +9,7 @@ app = FastAPI(
 
 # Đăng ký các Router module
 app.include_router(download.router, prefix="/api/download", tags=["Download"])
+app.include_router(transform.router, prefix="/api/transform", tags=["Transform"])
 
 @app.get("/")
 def root():

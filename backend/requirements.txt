@@ -6,3 +6,4 @@ pydantic-settings>=2.0.3
 websockets>=11.0.3
 httpx>=0.24.1
 aiofiles>=23.2.1
+ffmpeg-python>=0.2.0
