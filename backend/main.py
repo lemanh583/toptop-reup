@@ -1,10 +1,20 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import download, transform, voiceover
 
 app = FastAPI(
     title="Auto-Reup TikTok Admin API", 
     version="1.0.0",
     description="API hệ thống quản lý Tiktok Download"
+)
+
+# Thêm CORS để cho phép origin frontend localhost:5173
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Thay bằng ["http://localhost:5173"] khi deploy production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Đăng ký các Router module
