@@ -28,6 +28,56 @@
 - Component yêu cầu Download, Transform + Box nhập kịch bản Voiceover.
 - Tracker theo dõi tiến trình (Pending/Running/Done) real-time.
 
+### Phase 5: Integrate TikTokDownloader Web API and Cookie UI
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 5 to break down)
+
+### Phase 6: Thêm quy trình đánh lừa lên giao diện, có thể chỉnh sửa thông số, khi download video gốc về thì tự động lưu 1 bản gốc và 1 bản đã chỉnh sửa
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 5
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 6 to break down)
+
+### Phase 7: Thêm Filter nâng cao chống quét (Subtle Noise, Color, Crop, Unsharp)
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
+
+### Phase 8: Tự động bật browser truy cập Douyin lấy cookie
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
+
+### Phase 9: Nghiên cứu triển khai thêm tính năng có thể che sub cũ, chèn sub mới, Thêm giọng lồng tiếng
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
+
 ---
 *Roadmap created: 2026-03-19*
 *Last updated: 2026-03-19 after initial definition*
