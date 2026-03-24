@@ -152,26 +152,36 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
          raise e
                  
     if transform_configs.get("md5_pad", False):
-        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Ghi thêm MD5 Data bypass...'})
+        self.update_state(state='PROGRESS', meta={'progress': 80, 'status': 'Ghi thêm MD5 Data bypass...'})
         transformer.apply_md5_pad(output_file)
+    
+    # Phase 9: Subtitle burn-in (after anti-scan filters)
+    has_subtitle = transform_configs.get("new_subtitle_text") or transform_configs.get("srt_file_path")
+    if has_subtitle:
+        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Đang chèn subtitle mới vào video...'})
+        sub_input = output_file
+        sub_output = os.path.join(settings.STORAGE_PATH, f"{video_id}_subtitled.mp4")
+        success = transformer.apply_subtitle_burn(sub_input, sub_output, transform_configs)
+        if success and os.path.exists(sub_output):
+            import shutil
+            shutil.move(sub_output, output_file)  # Replace transformed file
         
     self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Chuỗi Encode Anti-scan hoàn tất'})
     return {"message": "Success", "transformed_file": output_file}
 
 @celery_app.task(bind=True, name="voiceover_video_task")
-def voiceover_video_task(self, video_id: str, script: str):
+def voiceover_video_task(self, video_id: str, script: str, voice: str = None, rate: str = "+0%"):
     from backend.services.voiceover import VoiceoverService
     from backend.services.transform import VideoTransformer
     
-    self.update_state(state='PROGRESS', meta={'progress': 10, 'status': 'Đang sinh âm thanh Voiceover TTS...'})
+    self.update_state(state='PROGRESS', meta={'progress': 10, 'status': f'Đang sinh âm thanh Voiceover TTS (Giọng: {voice or "Mặc định"})...'})
     tts_service = VoiceoverService()
     audio_path = os.path.join(settings.STORAGE_PATH, f"{video_id}_tts.mp3")
     
-    # Chạy edge-tts
-    success = tts_service.generate_tts_sync(script, audio_path)
+    # Chạy edge-tts với voice và rate
+    success = tts_service.generate_tts_sync(script, audio_path, voice=voice, rate=rate)
     if not success:
-        with open(audio_path, 'w') as f:
-            f.write("Mock mp3")
+        raise Exception("Edge-TTS không thể sinh âm thanh!")
             
     self.update_state(state='PROGRESS', meta={'progress': 50, 'status': 'Đang Mux FFmpeg audio và video...'})
     
@@ -185,9 +195,8 @@ def voiceover_video_task(self, video_id: str, script: str):
     
     try:
         transformer.apply_audio_mux(input_video, audio_path, output_video)
-    except:
-        with open(output_video, 'w') as f:
-            f.write("Mock generated voiceover video")
+    except Exception as e:
+        raise Exception(f"FFmpeg Mux lỗi: {str(e)}")
             
     self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Lồng tiếng thành công'})
     return {"message": "Success", "output_file": output_video}
