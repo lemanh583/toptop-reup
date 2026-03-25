@@ -41,6 +41,18 @@ async def trigger_download(req: DownloadRequest):
             "message": "Đã đưa 1 tiến trình vào hàng đợi."
         }
 
+@router.get("/status/{task_id}")
+async def get_task_status(task_id: str):
+    """REST endpoint for polling task status (used by CLI)."""
+    res = AsyncResult(task_id)
+    state = res.state
+    meta = res.info if isinstance(res.info, dict) else {"status": str(res.info) if res.info else ""}
+    return {
+        "task_id": task_id,
+        "state": state,
+        "meta": meta
+    }
+
 @router.websocket("/ws/status/{task_id}")
 async def websocket_status(websocket: WebSocket, task_id: str):
     await websocket.accept()
