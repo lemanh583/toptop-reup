@@ -158,24 +158,29 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
     # Phase 9: Subtitle overlay (drawbox + new sub in one FFmpeg pass)
     has_subtitle = (transform_configs.get("new_subtitle_text") or 
                     transform_configs.get("srt_file_path") or
-                    transform_configs.get("hide_old_sub"))
+                    transform_configs.get("sub_mode"))
     if has_subtitle:
-        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Đang xử lý subtitle (che sub cũ + chèn sub mới)...'})
+        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Đang xử lý phụ đề...'})
         sub_input = output_file
         sub_output = os.path.join(settings.STORAGE_PATH, f"{video_id}_subtitled.mp4")
         
         # Build subtitle configs
         sub_configs = {}
-        if transform_configs.get("hide_old_sub"):
+        sub_mode = transform_configs.get("sub_mode", "blackbox")
+        sub_configs["sub_mode"] = sub_mode
+        if sub_mode == "blackbox":
             sub_configs["sub_cover_x"] = transform_configs.get("sub_cover_x", 10)
             sub_configs["sub_cover_y"] = transform_configs.get("sub_cover_y", 80)
             sub_configs["sub_cover_w"] = transform_configs.get("sub_cover_w", 80)
             sub_configs["sub_cover_h"] = transform_configs.get("sub_cover_h", 20)
+        else:
+            sub_configs["sub_style"] = transform_configs.get("sub_style", "outline")
+
         if transform_configs.get("new_subtitle_text"):
             sub_configs["new_subtitle_text"] = transform_configs["new_subtitle_text"]
         if transform_configs.get("srt_file_path"):
             sub_configs["srt_file_path"] = transform_configs["srt_file_path"]
-        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 18)
+        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 14)
         sub_configs["sub_margin_v"] = transform_configs.get("sub_margin_v", 20)
 
         

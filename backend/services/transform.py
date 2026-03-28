@@ -163,13 +163,12 @@ class VideoTransformer:
             return False
 
     def apply_subtitle_overlay(self, input_path: str, output_path: str, configs: dict):
-        """Combined subtitle pipeline: black out old sub area + burn new sub.
+        """Combined subtitle pipeline with 2 modes.
         
         configs keys:
-          - sub_cover_x: int — X position as % of width (default 10)
-          - sub_cover_y: int — Y position as % of height (default 80)
-          - sub_cover_w: int — Width as % of total width (default 80)
-          - sub_cover_h: int — Height as % of total height (default 20)
+          - sub_mode: str — 'blackbox' (A: drawbox + sub) or 'overlay' (B: sub only, no bg)
+          - sub_style: str — for overlay mode: 'outline' | 'shadow' | 'glass' (default 'outline')
+          - sub_cover_x/y/w/h: int — for blackbox mode: position/size as %
           - new_subtitle_text: str — plain text to auto-split into SRT
           - srt_file_path: str — path to an existing .srt file
           - sub_font_size: int — font size (default 18)
@@ -177,19 +176,20 @@ class VideoTransformer:
         """
         try:
             vf_filters = []
+            sub_mode = configs.get("sub_mode", "blackbox")
             
-            # Step 1: Black out old subtitle area (configurable X, Y, W, H)
-            x_pct = configs.get("sub_cover_x", 10)
-            y_pct = configs.get("sub_cover_y", 80)
-            w_pct = configs.get("sub_cover_w", 80)
-            h_pct = configs.get("sub_cover_h", 20)
-            if y_pct and h_pct:
-                vf_filters.append(
-                    f"drawbox=x=iw*{x_pct/100}:y=ih*{y_pct/100}:w=iw*{w_pct/100}:h=ih*{h_pct/100}:color=black:t=fill"
-                )
-
+            # Mode A: Black out old subtitle area
+            if sub_mode == "blackbox":
+                x_pct = configs.get("sub_cover_x", 10)
+                y_pct = configs.get("sub_cover_y", 80)
+                w_pct = configs.get("sub_cover_w", 80)
+                h_pct = configs.get("sub_cover_h", 20)
+                if y_pct and h_pct:
+                    vf_filters.append(
+                        f"drawbox=x=iw*{x_pct/100}:y=ih*{y_pct/100}:w=iw*{w_pct/100}:h=ih*{h_pct/100}:color=black:t=fill"
+                    )
             
-            # Step 2: Prepare SRT file
+            # Prepare SRT file
             srt_path = configs.get("srt_file_path")
             temp_srt = None
             
@@ -200,20 +200,62 @@ class VideoTransformer:
                 srt_path = temp_srt.name
                 self._generate_srt_from_text(configs["new_subtitle_text"], duration, srt_path)
             
-            # Step 3: Add subtitle filter
+            # Build subtitle style based on mode
             if srt_path:
                 escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:")
                 font_size = configs.get("sub_font_size", 18)
                 margin_v = configs.get("sub_margin_v", 20)
-                vf_filters.append(
-                    f"subtitles={escaped_srt}:force_style='"
-                    f"FontSize={font_size},"
-                    f"PrimaryColour=&HFFFFFF&,"
-                    f"OutlineColour=&H000000&,"
-                    f"Outline=2,"
-                    f"BorderStyle=1,"
-                    f"MarginV={margin_v}'"
-                )
+                sub_style = configs.get("sub_style", "outline")
+                
+                if sub_mode == "blackbox":
+                    # Mode A: chữ trắng viền đen nhẹ trên nền đen
+                    style = (
+                        f"FontSize={font_size},"
+                        f"PrimaryColour=&HFFFFFF&,"
+                        f"OutlineColour=&H000000&,"
+                        f"Outline=2,"
+                        f"BorderStyle=1,"
+                        f"Shadow=0,"
+                        f"MarginV={margin_v}"
+                    )
+                elif sub_style == "shadow":
+                    # Mode B - Shadow: chữ trắng + bóng đen đậm
+                    style = (
+                        f"FontSize={font_size},"
+                        f"PrimaryColour=&HFFFFFF&,"
+                        f"OutlineColour=&H000000&,"
+                        f"Outline=2,"
+                        f"BorderStyle=1,"
+                        f"Shadow=3,"
+                        f"BackColour=&H80000000&,"
+                        f"MarginV={margin_v}"
+                    )
+                elif sub_style == "glass":
+                    # Mode B - Glass: chữ trắng + hộp nền đen 50% trong suốt
+                    style = (
+                        f"FontSize={font_size},"
+                        f"PrimaryColour=&HFFFFFF&,"
+                        f"OutlineColour=&H40000000&,"
+                        f"Outline=0,"
+                        f"BorderStyle=4,"
+                        f"BackColour=&H80000000&,"
+                        f"Shadow=0,"
+                        f"MarginV={margin_v}"
+                    )
+                else:
+                    # Mode B - Outline (default): chữ trắng viền đen dày — nổi trên mọi nền
+                    style = (
+                        f"FontSize={font_size},"
+                        f"PrimaryColour=&HFFFFFF&,"
+                        f"OutlineColour=&H000000&,"
+                        f"Outline=3,"
+                        f"BorderStyle=1,"
+                        f"Shadow=1,"
+                        f"MarginV={margin_v}"
+                    )
+                
+                vf_filters.append(f"subtitles={escaped_srt}:force_style='{style}'")
+
             
             if not vf_filters:
                 return False

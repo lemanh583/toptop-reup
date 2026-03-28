@@ -25,13 +25,14 @@ export default function App() {
 
   // Subtitle
   const [addSubtitle, setAddSubtitle] = useState(false);
-  const [hideOldSub, setHideOldSub] = useState(true);
+  const [subMode, setSubMode] = useState('blackbox'); // 'blackbox' or 'overlay'
+  const [subStyle, setSubStyle] = useState('outline'); // 'outline', 'shadow', 'glass'
   const [subCoverX, setSubCoverX] = useState(10);
   const [subCoverY, setSubCoverY] = useState(75);
   const [subCoverW, setSubCoverW] = useState(80);
   const [subCoverH, setSubCoverH] = useState(15);
   const [subText, setSubText] = useState('');
-  const [subFontSize, setSubFontSize] = useState(18);
+  const [subFontSize, setSubFontSize] = useState(14); // updated to 14 default
   const [subMarginV, setSubMarginV] = useState(20);
 
   // Voiceover
@@ -122,12 +123,14 @@ export default function App() {
     
     // Subtitle
     if (addSubtitle) {
-      if (hideOldSub) {
-        configs.hide_old_sub = true;
+      configs.sub_mode = subMode;
+      if (subMode === 'blackbox') {
         configs.sub_cover_x = subCoverX;
         configs.sub_cover_y = subCoverY;
         configs.sub_cover_w = subCoverW;
         configs.sub_cover_h = subCoverH;
+      } else {
+        configs.sub_style = subStyle;
       }
       if (subText.trim()) configs.new_subtitle_text = subText;
       configs.sub_font_size = subFontSize;
@@ -250,7 +253,7 @@ export default function App() {
                         style={{ maxHeight: '500px' }}
                       />
                       {/* Subtitle cover overlay */}
-                      {addSubtitle && hideOldSub && (
+                      {addSubtitle && subMode === 'blackbox' && (
                         <div 
                           className="absolute border-2 border-amber-500 bg-black/70 flex items-center justify-center text-amber-400 text-[10px] pointer-events-none"
                           style={{
@@ -298,15 +301,20 @@ export default function App() {
 
                         {addSubtitle && (
                           <div className="space-y-3">
-                            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-                              <input type="checkbox" checked={hideOldSub} onChange={e => setHideOldSub(e.target.checked)}
-                                className="rounded text-amber-600 bg-gray-700 border-gray-600" />
-                              Che sub cũ (phủ đen)
-                            </label>
+                            <div className="flex bg-gray-900 rounded-lg p-1 gap-1">
+                              <button onClick={() => setSubMode('blackbox')}
+                                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${subMode === 'blackbox' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                Che sub cũ (nền đen)
+                              </button>
+                              <button onClick={() => setSubMode('overlay')}
+                                className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${subMode === 'overlay' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                Sub nổi (không nền)
+                              </button>
+                            </div>
 
-                            {hideOldSub && (
+                            {subMode === 'blackbox' ? (
                               <div className="bg-gray-900/50 rounded-lg p-3 space-y-2">
-                                <p className="text-xs text-amber-400 font-medium">Kéo slider xem trực tiếp trên video ←</p>
+                                <p className="text-xs text-amber-400 font-medium">Kéo slider chỉnh vùng che trực tiếp trên video ←</p>
                                 {[
                                   ['X (trái)', subCoverX, setSubCoverX, 0, 50],
                                   ['Y (trên)', subCoverY, setSubCoverY, 30, 95],
@@ -323,6 +331,16 @@ export default function App() {
                                       className="w-full accent-amber-500 mt-0.5" />
                                   </div>
                                 ))}
+                              </div>
+                            ) : (
+                              <div className="bg-gray-900/50 rounded-lg p-3">
+                                <label className="text-xs text-gray-400 block mb-1">Hiệu ứng chữ nổi</label>
+                                <select value={subStyle} onChange={e => setSubStyle(e.target.value)}
+                                  className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500">
+                                  <option value="outline">Viền đen dày (Đề xuất)</option>
+                                  <option value="shadow">Đổ bóng đậm</option>
+                                  <option value="glass">Hộp nền mờ</option>
+                                </select>
                               </div>
                             )}
 
