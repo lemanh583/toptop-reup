@@ -484,6 +484,169 @@ def cmd_batch():
             poll_task(t["id"], t.get("name", "Task"))
 
 # ═══════════════════════════════════════════
+# Full Pipeline (Semi-auto)
+# ═══════════════════════════════════════════
+
+def cmd_full_pipeline():
+    """Full semi-auto pipeline: Download → Anti-scan → Subtitle → TTS."""
+    print("\n\033[1;36m══ FULL PIPELINE (Tải + Chống Scan + Sub + Lồng tiếng) ══\033[0m")
+    
+    # Step 1: URL
+    url = input("\n  📥 URL TikTok/Douyin: ").strip()
+    if not url:
+        return error("Cần nhập URL!")
+    cookie = input("  Cookie (Enter = tự động): ").strip() or None
+    
+    # Step 2: Anti-scan
+    print("\n\033[1;35m── Bước 1: Anti-Scan ──\033[0m")
+    use_anti_scan = ask_yn("  Bật Anti-Scan (7 bộ lọc)?", default=True)
+    transform_configs = {}
+    if use_anti_scan:
+        transform_configs = {
+            "hflip": True, "speed_shift": True, "md5_pad": True,
+            "dynamic_noise": True, "color_shift": True,
+            "edge_crop": True, "unsharp_mask": True
+        }
+    
+    # Step 3: Subtitle
+    print("\n\033[1;35m── Bước 2: Phụ đề ──\033[0m")
+    add_sub = ask_yn("  Chèn phụ đề?")
+    
+    if add_sub:
+        # Che sub cũ?
+        hide_old = ask_yn("  Video có sub cũ cần che?")
+        if hide_old:
+            transform_configs["hide_old_sub"] = True
+            print()
+            print("  \033[36m  Vị trí che sub (tính từ trên xuống, đơn vị %)")
+            print("    0%  ┌──────────┐")
+            print("        │  Video   │")
+            print("   Y%   │==========│ ← bắt đầu che")
+            print("        │▓▓▓▓▓▓▓▓▓▓│ ← vùng bị phủ đen")
+            print("  100%  └──────────┘\033[0m")
+            print()
+            y_input = input("  Vị trí Y bắt đầu che (%, mặc định 80): ").strip()
+            transform_configs["sub_cover_y"] = int(y_input) if y_input else 80
+            h_input = input("  Chiều cao vùng che (%, mặc định 20): ").strip()
+            transform_configs["sub_cover_h"] = int(h_input) if h_input else 20
+        else:
+            # Không có sub cũ, nhưng vẫn chèn sub mới → cần vùng nền
+            transform_configs["hide_old_sub"] = True
+            transform_configs["sub_cover_y"] = 82
+            transform_configs["sub_cover_h"] = 18
+            info("  Sẽ tạo dải nền đen ở 82-100% để đặt sub mới")
+        
+        # Nhập nội dung sub
+        print()
+        print("  Cách nhập phụ đề:")
+        print("    1. Nhập text trực tiếp (tự chia đều theo thời gian)")
+        print("    2. Đường dẫn file .SRT (đã có timing)")
+        choice = input("  Chọn (1/2) [1]: ").strip()
+        
+        if choice == "2":
+            srt_path = input("  Đường dẫn file .SRT: ").strip()
+            if srt_path and os.path.exists(srt_path):
+                transform_configs["srt_file_path"] = os.path.abspath(srt_path)
+            else:
+                error("File không tồn tại, bỏ qua sub")
+        else:
+            print("  Nhập nội dung sub (mỗi câu cách nhau bởi dấu chấm '.'):")
+            sub_text = input("  > ").strip()
+            if sub_text:
+                transform_configs["new_subtitle_text"] = sub_text
+        
+        # Font size & margin
+        fs = input("  Cỡ chữ sub (mặc định 18): ").strip()
+        transform_configs["sub_font_size"] = int(fs) if fs else 18
+        mv = input("  Margin dưới px (mặc định 20): ").strip()
+        transform_configs["sub_margin_v"] = int(mv) if mv else 20
+    
+    # Step 4: Submit Download + Transform
+    auto_transform = use_anti_scan or add_sub
+    info("Đang gửi job Download + Transform...")
+    result = api_post("/download", {
+        "url": url,
+        "cookie": cookie,
+        "auto_transform": auto_transform,
+        "transform_configs": transform_configs
+    })
+    
+    if not result:
+        return
+    
+    tasks = result.get("tasks", [])
+    success(result.get("message", "Job đã được tạo"))
+    
+    for t in tasks:
+        poll_task(t["id"], t.get("name", "Task"))
+    
+    # Step 5: TTS Voiceover
+    print("\n\033[1;35m── Bước 3: Lồng tiếng (TTS) ──\033[0m")
+    add_tts = ask_yn("  Thêm lồng tiếng AI?")
+    
+    if add_tts:
+        # Lấy video_id từ URL (modal_id)
+        video_id = None
+        import re
+        modal_match = re.search(r'modal_id=(\d+)', url)
+        if modal_match:
+            video_id = modal_match.group(1)
+        else:
+            video_match = re.search(r'/video/(\d+)', url)
+            if video_match:
+                video_id = video_match.group(1)
+        
+        if not video_id:
+            video_id = input("  Video ID (tên file không có .mp4): ").strip()
+        else:
+            info(f"  Video ID tự phát hiện: {video_id}")
+        
+        if not video_id:
+            return error("Không xác định được Video ID!")
+        
+        script = input("  Script lồng tiếng: ").strip()
+        if not script:
+            return error("Cần nhập script!")
+        
+        # Voice selection
+        voice = None
+        rate = "+0%"
+        use_custom = ask_yn("  Chọn giọng tùy chỉnh?")
+        if use_custom:
+            voices_data = api_get("/voiceover/voices")
+            voices = voices_data.get("voices", []) if voices_data else []
+            vi_voices = [v for v in voices if "vi-VN" in v]
+            if vi_voices:
+                print("  Giọng Việt:")
+                for i, v in enumerate(vi_voices, 1):
+                    print(f"    {i}. {v}")
+                vc = input(f"  Chọn (1-{len(vi_voices)}): ").strip()
+                try:
+                    voice = vi_voices[int(vc)-1]
+                except (ValueError, IndexError):
+                    pass
+            
+            rate_input = input("  Tốc độ (-30 đến +30, Enter=0): ").strip()
+            if rate_input:
+                try:
+                    rv = int(rate_input)
+                    rate = f"{'+' if rv >= 0 else ''}{rv}%"
+                except ValueError:
+                    pass
+        
+        info(f"  Giọng: {voice or 'Mặc định'} | Tốc độ: {rate}")
+        result = api_post("/voiceover", {
+            "video_id": video_id,
+            "script": script,
+            "voice": voice,
+            "rate": rate
+        })
+        if result and result.get("task_id"):
+            poll_task(result["task_id"], "Lồng tiếng")
+    
+    success("🎉 Pipeline hoàn tất!")
+
+# ═══════════════════════════════════════════
 # Main Menu
 # ═══════════════════════════════════════════
 
@@ -499,20 +662,24 @@ def main_menu():
         clear()
         header()
         
+        print("  \033[1;33m★\033[0m \033[1m9\033[0m │ 🚀 \033[1mFULL PIPELINE\033[0m (Tải + Scan + Sub + Lồng tiếng)")
+        print("  ─────┼───────────────────────────────────────────")
         print("  \033[1m1\033[0m │ 📥 Tải video (chỉ download)")
-        print("  \033[1m2\033[0m │ 🛡️  Tải + Anti-Scan (download + 7 bộ lọc)")
+        print("  \033[1m2\033[0m │ 🛡️  Tải + Anti-Scan")
         print("  \033[1m3\033[0m │ 📝 Tải + Anti-Scan + Phụ đề")
-        print("  \033[1m4\033[0m │ 🎙️  Lồng tiếng AI (Voiceover)")
-        print("  \033[1m5\033[0m │ 🔧 Anti-Scan riêng (video đã tải)")
+        print("  \033[1m4\033[0m │ 🎙️  Lồng tiếng AI (video đã tải)")
+        print("  \033[1m5\033[0m │ 🔧 Anti-Scan riêng")
         print("  \033[1m6\033[0m │ 🗣️  Liệt kê giọng đọc")
         print("  \033[1m7\033[0m │ 📁 Xem video trong storage")
-        print("  \033[1m8\033[0m │ 📋 Batch download (từ file)")
+        print("  \033[1m8\033[0m │ 📋 Batch download")
         print("  \033[1m0\033[0m │ 🚪 Thoát")
         print()
         
         choice = input("  ▸ Chọn: ").strip()
         
-        if choice == '1':
+        if choice == '9':
+            cmd_full_pipeline()
+        elif choice == '1':
             cmd_download(with_transform=False)
         elif choice == '2':
             cmd_download(with_transform=True)
@@ -539,3 +706,4 @@ def main_menu():
 
 if __name__ == "__main__":
     main_menu()
+

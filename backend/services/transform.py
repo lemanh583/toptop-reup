@@ -162,35 +162,62 @@ class VideoTransformer:
             print(f"FFmpeg Error: {e.stderr}")
             return False
 
-    def apply_subtitle_burn(self, input_path: str, output_path: str, configs: dict):
-        """Burn subtitles into video from text or SRT file.
+    def apply_subtitle_overlay(self, input_path: str, output_path: str, configs: dict):
+        """Combined subtitle pipeline: black out old sub area + burn new sub.
         
         configs keys:
+          - sub_cover_y: int — Y position as % of height to start blackout (default 80)
+          - sub_cover_h: int — Height as % of total height (default 20)
           - new_subtitle_text: str — plain text to auto-split into SRT
           - srt_file_path: str — path to an existing .srt file
+          - sub_font_size: int — font size (default 18)
+          - sub_margin_v: int — bottom margin in pixels (default 20)
         """
         try:
+            vf_filters = []
+            
+            # Step 1: Black out old subtitle area
+            y_pct = configs.get("sub_cover_y", 80)
+            h_pct = configs.get("sub_cover_h", 20)
+            if y_pct and h_pct:
+                vf_filters.append(
+                    f"drawbox=x=0:y=ih*{y_pct/100}:w=iw:h=ih*{h_pct/100}:color=black:t=fill"
+                )
+            
+            # Step 2: Prepare SRT file
             srt_path = configs.get("srt_file_path")
             temp_srt = None
             
             if not srt_path and configs.get("new_subtitle_text"):
-                # Auto-generate SRT from plain text
                 duration = self._get_video_duration(input_path)
                 temp_srt = tempfile.NamedTemporaryFile(suffix=".srt", delete=False, mode="w", encoding="utf-8")
                 temp_srt.close()
                 srt_path = temp_srt.name
                 self._generate_srt_from_text(configs["new_subtitle_text"], duration, srt_path)
             
-            if not srt_path:
+            # Step 3: Add subtitle filter
+            if srt_path:
+                escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:")
+                font_size = configs.get("sub_font_size", 18)
+                margin_v = configs.get("sub_margin_v", 20)
+                vf_filters.append(
+                    f"subtitles={escaped_srt}:force_style='"
+                    f"FontSize={font_size},"
+                    f"PrimaryColour=&HFFFFFF&,"
+                    f"OutlineColour=&H000000&,"
+                    f"Outline=2,"
+                    f"BorderStyle=1,"
+                    f"MarginV={margin_v}'"
+                )
+            
+            if not vf_filters:
                 return False
             
-            # Escape path for FFmpeg subtitles filter (colons and backslashes)
-            escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:")
-            
-            # Build FFmpeg command manually for subtitles filter (ffmpeg-python has issues with it)
+            # Combine all filters in one FFmpeg pass
+            vf_chain = ",".join(vf_filters)
             cmd = [
                 "ffmpeg", "-y", "-i", input_path,
-                "-vf", f"subtitles={escaped_srt}:force_style='FontSize=22,PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&,Outline=2,MarginV=30'",
+                "-vf", vf_chain,
                 "-c:a", "copy",
                 output_path
             ]
@@ -202,13 +229,14 @@ class VideoTransformer:
                 os.unlink(temp_srt.name)
                 
             if result.returncode != 0:
-                print(f"Subtitle Burn Error: {result.stderr[-500:]}")
+                print(f"Subtitle Overlay Error: {result.stderr[-500:]}")
                 return False
                 
             return True
         except Exception as e:
-            print(f"Subtitle Burn Error: {e}")
+            print(f"Subtitle Overlay Error: {e}")
             return False
+
 
     def apply_md5_pad(self, file_path: str):
         try:

@@ -155,16 +155,32 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
         self.update_state(state='PROGRESS', meta={'progress': 80, 'status': 'Ghi thêm MD5 Data bypass...'})
         transformer.apply_md5_pad(output_file)
     
-    # Phase 9: Subtitle burn-in (after anti-scan filters)
-    has_subtitle = transform_configs.get("new_subtitle_text") or transform_configs.get("srt_file_path")
+    # Phase 9: Subtitle overlay (drawbox + new sub in one FFmpeg pass)
+    has_subtitle = (transform_configs.get("new_subtitle_text") or 
+                    transform_configs.get("srt_file_path") or
+                    transform_configs.get("hide_old_sub"))
     if has_subtitle:
-        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Đang chèn subtitle mới vào video...'})
+        self.update_state(state='PROGRESS', meta={'progress': 90, 'status': 'Đang xử lý subtitle (che sub cũ + chèn sub mới)...'})
         sub_input = output_file
         sub_output = os.path.join(settings.STORAGE_PATH, f"{video_id}_subtitled.mp4")
-        success = transformer.apply_subtitle_burn(sub_input, sub_output, transform_configs)
+        
+        # Build subtitle configs
+        sub_configs = {}
+        if transform_configs.get("hide_old_sub"):
+            sub_configs["sub_cover_y"] = transform_configs.get("sub_cover_y", 80)
+            sub_configs["sub_cover_h"] = transform_configs.get("sub_cover_h", 20)
+        if transform_configs.get("new_subtitle_text"):
+            sub_configs["new_subtitle_text"] = transform_configs["new_subtitle_text"]
+        if transform_configs.get("srt_file_path"):
+            sub_configs["srt_file_path"] = transform_configs["srt_file_path"]
+        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 18)
+        sub_configs["sub_margin_v"] = transform_configs.get("sub_margin_v", 20)
+        
+        success = transformer.apply_subtitle_overlay(sub_input, sub_output, sub_configs)
         if success and os.path.exists(sub_output):
             import shutil
-            shutil.move(sub_output, output_file)  # Replace transformed file
+            shutil.move(sub_output, output_file)
+
         
     self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Chuỗi Encode Anti-scan hoàn tất'})
     return {"message": "Success", "transformed_file": output_file}
