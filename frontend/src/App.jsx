@@ -40,6 +40,8 @@ export default function App() {
   const [voiceList, setVoiceList] = useState([]);
   const [selectedVoice, setSelectedVoice] = useState('');
   const [voiceRate, setVoiceRate] = useState(0);
+  const [origVolume, setOrigVolume] = useState(0.5);
+  const [ttsVolume, setTtsVolume] = useState(1.0);
 
   // Files
   const [files, setFiles] = useState([]);
@@ -150,7 +152,9 @@ export default function App() {
             const { data: voData } = await axios.post(`${API_BASE}/voiceover`, {
               video_id: downloadedVideo.id, script,
               voice: selectedVoice || undefined,
-              rate: `${voiceRate >= 0 ? '+' : ''}${voiceRate}%`
+              rate: `${voiceRate >= 0 ? '+' : ''}${voiceRate}%`,
+              orig_vol: origVolume,
+              tts_vol: ttsVolume
             });
             if (voData.task_id) pollTask(voData.task_id, 'Lồng tiếng AI');
           } catch { }
@@ -404,6 +408,26 @@ export default function App() {
                               <input type="range" min={-30} max={30} step={5} value={voiceRate}
                                 onChange={e => setVoiceRate(Number(e.target.value))}
                                 className="w-full accent-purple-500 mt-0.5" />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="text-xs text-gray-400 flex justify-between">
+                                  <span>Âm video gốc</span>
+                                  <span className="text-purple-400 font-mono">{Math.round(origVolume * 100)}%</span>
+                                </label>
+                                <input type="range" min={0} max={1} step={0.1} value={origVolume}
+                                  onChange={e => setOrigVolume(Number(e.target.value))}
+                                  className="w-full accent-purple-500 mt-0.5" />
+                              </div>
+                              <div>
+                                <label className="text-xs text-gray-400 flex justify-between">
+                                  <span>Âm giọng đọc</span>
+                                  <span className="text-purple-400 font-mono">{Math.round(ttsVolume * 100)}%</span>
+                                </label>
+                                <input type="range" min={0} max={2} step={0.1} value={ttsVolume}
+                                  onChange={e => setTtsVolume(Number(e.target.value))}
+                                  className="w-full accent-purple-500 mt-0.5" />
+                              </div>
                             </div>
                           </div>
                         )}

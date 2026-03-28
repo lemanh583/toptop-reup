@@ -9,10 +9,16 @@ class VoiceoverRequest(BaseModel):
     script: str
     voice: str | None = None
     rate: str = "+0%"
+    orig_vol: float = 0.5
+    tts_vol: float = 1.0
 
 @router.post("")
 async def trigger_voiceover(req: VoiceoverRequest):
-    task = voiceover_video_task.delay(req.video_id, req.script, voice=req.voice, rate=req.rate)
+    task = voiceover_video_task.delay(
+        req.video_id, req.script, 
+        voice=req.voice, rate=req.rate,
+        orig_vol=req.orig_vol, tts_vol=req.tts_vol
+    )
     return {
         "task_id": task.id, 
         "message": "Voiceover Job Queued"

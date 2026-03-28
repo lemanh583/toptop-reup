@@ -151,7 +151,7 @@ class VideoTransformer:
                 needs_reencode = True
                 
             if needs_reencode:
-                out = ffmpeg.output(video, audio, output_path)
+                out = ffmpeg.output(video, audio, output_path).global_args('-nostdin')
                 out.run(overwrite_output=True, quiet=True)
             else:
                 import shutil
@@ -263,7 +263,7 @@ class VideoTransformer:
             # Combine all filters in one FFmpeg pass
             vf_chain = ",".join(vf_filters)
             cmd = [
-                "ffmpeg", "-y", "-i", input_path,
+                "ffmpeg", "-nostdin", "-y", "-i", input_path,
                 "-vf", vf_chain,
                 "-c:a", "copy",
                 output_path
@@ -298,21 +298,21 @@ class VideoTransformer:
             print(f"MD5 Pad Error: {e}")
             return False
 
-    def apply_audio_mux(self, video_path: str, audio_path: str, output_path: str):
+    def apply_audio_mux(self, video_path: str, audio_path: str, output_path: str, orig_vol: float = 0.5, tts_vol: float = 1.0):
         try:
             v_stream = ffmpeg.input(video_path)
             a_stream = ffmpeg.input(audio_path)
             
-            # Reduce original volume by roughly 85% (volume=0.15)
-            original_audio = v_stream.audio.filter('volume', 0.15)
+            # Use provided volume levels (0.0 to 2.0 range recommendation)
+            original_audio = v_stream.audio.filter('volume', orig_vol)
             
-            # Loop the TTS audio infinitely (-1 = infinity), high volume
-            tts_audio = a_stream.audio.filter('aloop', loop=-1, size=2e9).filter('volume', 1.5)
+            # Loop the TTS audio infinitely, set volume
+            tts_audio = a_stream.audio.filter('aloop', loop=-1, size=2e9).filter('volume', tts_vol)
             
             # amix two streams, duration=first means cut to the video length
             mixed = ffmpeg.filter([original_audio, tts_audio], 'amix', inputs=2, duration='first')
             
-            out = ffmpeg.output(v_stream.video, mixed, output_path, shortest=None)
+            out = ffmpeg.output(v_stream.video, mixed, output_path, shortest=None).global_args('-nostdin')
             out.run(overwrite_output=True, quiet=True)
             return True
             

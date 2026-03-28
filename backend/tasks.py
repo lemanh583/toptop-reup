@@ -194,7 +194,7 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
     return {"message": "Success", "transformed_file": output_file}
 
 @celery_app.task(bind=True, name="voiceover_video_task")
-def voiceover_video_task(self, video_id: str, script: str, voice: str = None, rate: str = "+0%"):
+def voiceover_video_task(self, video_id: str, script: str, voice: str = None, rate: str = "+0%", orig_vol: float = 0.5, tts_vol: float = 1.0):
     from backend.services.voiceover import VoiceoverService
     from backend.services.transform import VideoTransformer
     
@@ -218,7 +218,7 @@ def voiceover_video_task(self, video_id: str, script: str, voice: str = None, ra
     transformer = VideoTransformer()
     
     try:
-        transformer.apply_audio_mux(input_video, audio_path, output_video)
+        transformer.apply_audio_mux(input_video, audio_path, output_video, orig_vol=orig_vol, tts_vol=tts_vol)
     except Exception as e:
         raise Exception(f"FFmpeg Mux lỗi: {str(e)}")
             
