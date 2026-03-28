@@ -167,7 +167,9 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
         # Build subtitle configs
         sub_configs = {}
         if transform_configs.get("hide_old_sub"):
+            sub_configs["sub_cover_x"] = transform_configs.get("sub_cover_x", 10)
             sub_configs["sub_cover_y"] = transform_configs.get("sub_cover_y", 80)
+            sub_configs["sub_cover_w"] = transform_configs.get("sub_cover_w", 80)
             sub_configs["sub_cover_h"] = transform_configs.get("sub_cover_h", 20)
         if transform_configs.get("new_subtitle_text"):
             sub_configs["new_subtitle_text"] = transform_configs["new_subtitle_text"]
@@ -175,6 +177,7 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
             sub_configs["srt_file_path"] = transform_configs["srt_file_path"]
         sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 18)
         sub_configs["sub_margin_v"] = transform_configs.get("sub_margin_v", 20)
+
         
         success = transformer.apply_subtitle_overlay(sub_input, sub_output, sub_configs)
         if success and os.path.exists(sub_output):

@@ -166,7 +166,9 @@ class VideoTransformer:
         """Combined subtitle pipeline: black out old sub area + burn new sub.
         
         configs keys:
-          - sub_cover_y: int — Y position as % of height to start blackout (default 80)
+          - sub_cover_x: int — X position as % of width (default 10)
+          - sub_cover_y: int — Y position as % of height (default 80)
+          - sub_cover_w: int — Width as % of total width (default 80)
           - sub_cover_h: int — Height as % of total height (default 20)
           - new_subtitle_text: str — plain text to auto-split into SRT
           - srt_file_path: str — path to an existing .srt file
@@ -176,13 +178,16 @@ class VideoTransformer:
         try:
             vf_filters = []
             
-            # Step 1: Black out old subtitle area
+            # Step 1: Black out old subtitle area (configurable X, Y, W, H)
+            x_pct = configs.get("sub_cover_x", 10)
             y_pct = configs.get("sub_cover_y", 80)
+            w_pct = configs.get("sub_cover_w", 80)
             h_pct = configs.get("sub_cover_h", 20)
             if y_pct and h_pct:
                 vf_filters.append(
-                    f"drawbox=x=0:y=ih*{y_pct/100}:w=iw:h=ih*{h_pct/100}:color=black:t=fill"
+                    f"drawbox=x=iw*{x_pct/100}:y=ih*{y_pct/100}:w=iw*{w_pct/100}:h=ih*{h_pct/100}:color=black:t=fill"
                 )
+
             
             # Step 2: Prepare SRT file
             srt_path = configs.get("srt_file_path")
