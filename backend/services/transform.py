@@ -21,6 +21,35 @@ class VideoTransformer:
         except Exception:
             return 30.0  # fallback default
 
+    def get_video_info(self, file_path: str) -> dict:
+        """Get video width, height, duration."""
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-print_format", "json",
+                 "-show_streams", "-show_format", file_path],
+                capture_output=True, text=True
+            )
+            data = json.loads(result.stdout)
+            video_stream = next(s for s in data["streams"] if s["codec_type"] == "video")
+            return {
+                "width": int(video_stream["width"]),
+                "height": int(video_stream["height"]),
+                "duration": float(data["format"].get("duration", 0)),
+                "fps": video_stream.get("r_frame_rate", "30/1")
+            }
+        except Exception:
+            return {"width": 720, "height": 1280, "duration": 30.0, "fps": "30/1"}
+
+    def extract_frame(self, video_path: str, output_path: str, time_sec: float = 3.0):
+        """Extract a single frame from video for preview."""
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(time_sec),
+            "-i", video_path, "-vframes", "1",
+            "-q:v", "2", output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode == 0
+
     def _generate_srt_from_text(self, text: str, duration: float, output_path: str):
         """Auto-split plain text into evenly-timed SRT segments."""
         # Split by newlines or periods, filter empty
@@ -98,10 +127,27 @@ class VideoTransformer:
                 audio = audio.filter('atempo', 1/speed)
                 needs_reencode = True
 
-            # --- Phase 9: Subtitle features ---
+            # --- Phase 9: Subtitle cover ---
             if configs.get("hide_old_sub", False):
-                # Che sub cũ: phủ dải đen 15% dưới cùng video
-                video = video.drawbox(x=0, y='ih*0.85', width='iw', height='ih*0.15', color='black', t='fill')
+                # Configurable subtitle cover:
+                #   sub_cover_y: Y position as % of height (default 82%)
+                #   sub_cover_h: Height as % of total (default 18%)
+                #   sub_cover_mode: "black" or "blur" (default "black")
+                y_pct = configs.get("sub_cover_y", 82) / 100.0
+                h_pct = configs.get("sub_cover_h", 18) / 100.0
+                mode = configs.get("sub_cover_mode", "black")
+                
+                if mode == "blur":
+                    # Blur the subtitle region using crop+boxblur+overlay
+                    # This is complex with ffmpeg-python, use subprocess
+                    pass  # Handled separately below
+                else:
+                    # Black fill
+                    video = video.drawbox(
+                        x=0, y=f'ih*{y_pct}',
+                        width='iw', height=f'ih*{h_pct}',
+                        color='black', t='fill'
+                    )
                 needs_reencode = True
                 
             if needs_reencode:

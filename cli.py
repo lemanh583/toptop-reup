@@ -155,14 +155,61 @@ def prompt_anti_scan_config():
     
     return configs
 
-def prompt_subtitle_config():
-    """Prompt user for subtitle configuration."""
+def prompt_subtitle_config(video_path=None):
+    """Prompt user for subtitle configuration with position control."""
     print("\n\033[1;35m── Cấu hình Phụ đề ──\033[0m")
     
     configs = {}
-    configs["hide_old_sub"] = ask_yn("  Che sub cũ (phủ đen 15% dưới cùng)?")
     
-    sub_text = input("  Nhập phụ đề mới (Enter để bỏ qua): ").strip()
+    # Show video info if available
+    if video_path and os.path.exists(video_path):
+        try:
+            from backend.services.transform import VideoTransformer
+            t = VideoTransformer()
+            vinfo = t.get_video_info(video_path)
+            print(f"  📐 Video: {vinfo['width']}×{vinfo['height']}px, {vinfo['duration']:.1f}s")
+            
+            # Extract preview frame
+            preview_path = video_path.replace('.mp4', '_preview.jpg')
+            if t.extract_frame(video_path, preview_path, time_sec=3.0):
+                success(f"  Frame preview đã lưu: {preview_path}")
+                print(f"  → Mở file này để xem vị trí sub trong video")
+        except Exception as e:
+            print(f"  (Không lấy được info: {e})")
+    
+    # 1. Hide old subtitle
+    configs["hide_old_sub"] = ask_yn("  Che sub cũ?")
+    
+    if configs["hide_old_sub"]:
+        print()
+        print("  \033[36m┌─ Vị trí che sub (tính từ trên xuống, đơn vị %) ─┐")
+        print("  │  0%  ┌──────────┐                                │")
+        print("  │      │  Video   │                                │")
+        print("  │      │          │                                │")
+        print("  │ 75%  │----------│ ← sub_cover_y (bắt đầu che)   │")
+        print("  │      │▓▓▓▓▓▓▓▓▓▓│ ← vùng bị che                 │")
+        print("  │ 100% └──────────┘                                │")
+        print("  └──────────────────────────────────────────────────┘\033[0m")
+        print()
+        
+        y_input = input("  Vị trí Y bắt đầu che (%, mặc định 75): ").strip()
+        configs["sub_cover_y"] = int(y_input) if y_input else 75
+        
+        h_input = input("  Chiều cao vùng che (%, mặc định 25): ").strip()
+        configs["sub_cover_h"] = int(h_input) if h_input else 25
+        
+        # Validate
+        if configs["sub_cover_y"] + configs["sub_cover_h"] > 100:
+            configs["sub_cover_h"] = 100 - configs["sub_cover_y"]
+            info(f"  Đã tự điều chỉnh chiều cao = {configs['sub_cover_h']}%")
+        
+        print(f"\n  → Sẽ che từ {configs['sub_cover_y']}% đến {configs['sub_cover_y'] + configs['sub_cover_h']}% chiều cao video")
+        
+        mode = input("  Kiểu che (1=Đen, 2=Blur) [1]: ").strip()
+        configs["sub_cover_mode"] = "blur" if mode == "2" else "black"
+    
+    # 2. Add new subtitle
+    sub_text = input("\n  Nhập phụ đề mới (Enter để bỏ qua): ").strip()
     if sub_text:
         configs["new_subtitle_text"] = sub_text
     else:
@@ -173,6 +220,7 @@ def prompt_subtitle_config():
             error(f"File không tồn tại: {srt_path}")
     
     return configs
+
 
 def cmd_download(with_transform=False, with_subtitle=False):
     """Download video from URL."""
