@@ -180,7 +180,7 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
             sub_configs["new_subtitle_text"] = transform_configs["new_subtitle_text"]
         if transform_configs.get("srt_file_path"):
             sub_configs["srt_file_path"] = transform_configs["srt_file_path"]
-        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 14)
+        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 12)
         sub_configs["sub_margin_v"] = transform_configs.get("sub_margin_v", 20)
 
         

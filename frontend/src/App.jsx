@@ -31,7 +31,7 @@ export default function App() {
   const [subCoverY, setSubCoverY] = useState(75);
   const [subCoverW, setSubCoverW] = useState(80);
   const [subText, setSubText] = useState('Bí quyết làm món xào thơm lừng. Đầu tiên, phi thơm hành tỏi và xả băm. Sau đó, cho nguyên liệu đã ướp vào đảo đều tay. Thêm chút nước mắm, đường và ớt tươi. Xào trên lửa lớn để nguyên liệu săn lại và thấm gia vị. Chúc các bạn thành công!');
-  const [subFontSize, setSubFontSize] = useState(14); // updated to 14 default
+  const [subFontSize, setSubFontSize] = useState(12); // updated to 12 default
   const [subMarginV, setSubMarginV] = useState(20);
 
   // Voiceover
