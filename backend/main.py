@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from backend.api.routes import download, transform, voiceover
@@ -42,10 +42,10 @@ def list_files():
             fpath = os.path.join(STORAGE_PATH, f)
             size_mb = os.path.getsize(fpath) / (1024 * 1024)
             tag = "gốc"
-            if "_transformed" in f:
-                tag = "anti-scan"
-            elif "_voiceover" in f:
+            if "_voiceover" in f:
                 tag = "voiceover"
+            elif "_transformed" in f:
+                tag = "anti-scan"
             files.append({
                 "name": f,
                 "size_mb": round(size_mb, 1),
@@ -54,3 +54,15 @@ def list_files():
             })
     return {"files": files}
 
+@app.delete("/api/files/{filename}")
+def delete_file(filename: str):
+    """Delete a video file from storage."""
+    # Security: ensure only .mp4 files in STORAGE_PATH can be deleted
+    if not filename.endswith('.mp4') or ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+        
+    file_path = os.path.join(STORAGE_PATH, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        return {"message": f"Deleted {filename}"}
+    raise HTTPException(status_code=404, detail="File not found")

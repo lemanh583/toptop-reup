@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { Download, MonitorPlay, Mic, Loader2, CheckCircle, AlertTriangle, FolderOpen, RefreshCw, Film, Subtitles, Play, Settings } from 'lucide-react';
+import { Download, MonitorPlay, Mic, Loader2, CheckCircle, AlertTriangle, FolderOpen, RefreshCw, Film, Subtitles, Play, Settings, Trash2 } from 'lucide-react';
 
 const API_BASE = window.location.port === '5173' 
-  ? "http://localhost:8000/api" 
+  ? `http://${window.location.hostname}:8000/api` 
   : `${window.location.origin}/api`;
 
 const STORAGE_BASE = window.location.port === '5173'
-  ? "http://localhost:8000/storage"
+  ? `http://${window.location.hostname}:8000/storage`
   : `${window.location.origin}/storage`;
 
 export default function App() {
@@ -15,6 +15,7 @@ export default function App() {
   const [cookie, setCookie] = useState('');
   const [tasks, setTasks] = useState([]);
   const [activeTab, setActiveTab] = useState('main');
+  const [showLibrary, setShowLibrary] = useState(false);
   
   // 2-step state
   const [step, setStep] = useState(1); // 1=download, 2=configure
@@ -27,9 +28,12 @@ export default function App() {
   const [addSubtitle, setAddSubtitle] = useState(false);
   const [subMode, setSubMode] = useState('blackbox'); // 'blackbox' or 'overlay'
   const [subStyle, setSubStyle] = useState('outline'); // 'outline', 'shadow', 'glass'
+  const [coverStyle, setCoverStyle] = useState('black'); // 'black' or 'blur'
+  const [subPosition, setSubPosition] = useState('cover'); // 'cover' or 'bottom'
   const [subCoverX, setSubCoverX] = useState(10);
   const [subCoverY, setSubCoverY] = useState(75);
   const [subCoverW, setSubCoverW] = useState(80);
+  const [subCoverH, setSubCoverH] = useState(12);
   const [subText, setSubText] = useState('Bí quyết làm món xào thơm lừng. Đầu tiên, phi thơm hành tỏi và xả băm. Sau đó, cho nguyên liệu đã ướp vào đảo đều tay. Thêm chút nước mắm, đường và ớt tươi. Xào trên lửa lớn để nguyên liệu săn lại và thấm gia vị. Chúc các bạn thành công!');
   const [subFontSize, setSubFontSize] = useState(12); // updated to 12 default
   const [subMarginV, setSubMarginV] = useState(20);
@@ -42,6 +46,7 @@ export default function App() {
   const [voiceRate, setVoiceRate] = useState(0);
   const [origVolume, setOrigVolume] = useState(0.5);
   const [ttsVolume, setTtsVolume] = useState(1.0);
+  const [processedVideo, setProcessedVideo] = useState(null);
 
   // Files
   const [files, setFiles] = useState([]);
@@ -125,6 +130,8 @@ export default function App() {
     // Subtitle
     if (addSubtitle) {
       configs.sub_mode = subMode;
+      configs.cover_style = coverStyle;
+      configs.sub_position = subPosition;
       if (subMode === 'blackbox') {
         configs.sub_cover_x = subCoverX;
         configs.sub_cover_y = subCoverY;
@@ -143,11 +150,17 @@ export default function App() {
         video_id: downloadedVideo.id,
         transform_configs: configs
       });
-      pollTask(data.task_id, 'Xử lý Anti-scan + Subtitle');
+      
+      pollTask(data.task_id, 'Xử lý Anti-scan + Subtitle', () => {
+        if (!addVoiceover) {
+          setProcessedVideo(`${STORAGE_BASE}/${downloadedVideo.id}_transformed.mp4`);
+          setStep(3);
+        }
+      });
       
       // Voiceover
       if (addVoiceover && script.trim()) {
-        setTimeout(async () => {
+        const startVoiceover = async () => {
           try {
             const { data: voData } = await axios.post(`${API_BASE}/voiceover`, {
               video_id: downloadedVideo.id, script,
@@ -156,9 +169,17 @@ export default function App() {
               orig_vol: origVolume,
               tts_vol: ttsVolume
             });
-            if (voData.task_id) pollTask(voData.task_id, 'Lồng tiếng AI');
+            if (voData.task_id) {
+              pollTask(voData.task_id, 'Lồng tiếng AI', () => {
+                setProcessedVideo(`${STORAGE_BASE}/${downloadedVideo.id}_voiceover.mp4`);
+                setStep(3);
+              });
+            }
           } catch { }
-        }, 15000);
+        };
+        
+        // Đợi transform bắt đầu rồi mới queue voiceover (hoặc queue luôn nếu server handle được)
+        setTimeout(startVoiceover, 2000);
       }
     } catch { alert('Lỗi xử lý!'); }
   };
@@ -167,11 +188,22 @@ export default function App() {
   const handleNewVideo = () => {
     setStep(1);
     setDownloadedVideo(null);
+    setProcessedVideo(null);
     setUrl('');
     setAddSubtitle(false);
     setAddVoiceover(false);
     setSubText('');
     setScript('');
+  };
+  
+  const handleDelete = async (filename) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa video ${filename}?`)) return;
+    try {
+      await axios.delete(`${API_BASE}/files/${filename}`);
+      fetchFiles();
+    } catch {
+      alert('Lỗi khi xóa file!');
+    }
   };
 
   const viVoices = voiceList.filter(v => v.includes('vi-VN'));
@@ -218,16 +250,42 @@ export default function App() {
                     onKeyDown={e => e.key === 'Enter' && handleDownload()}
                   />
                   <input type="text" 
-                    className="w-56 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-48 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     placeholder="Cookie (tùy chọn)"
                     value={cookie} onChange={e => setCookie(e.target.value)}
                   />
-                  <button onClick={handleDownload} disabled={!url}
-                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-6 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all">
+                  <button onClick={handleDownload} disabled={!url || loading}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all">
                     <Download className="w-4 h-4" />Tải video
                   </button>
+                  <button onClick={() => { setShowLibrary(!showLibrary); fetchFiles(); }}
+                    className="bg-gray-800 hover:bg-gray-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 border border-gray-700 transition-all">
+                    <FolderOpen className="w-4 h-4 text-amber-400" />Chọn từ thư viện
+                  </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-2">Sau khi tải xong, video sẽ hiện lên để bạn xem và cấu hình phụ đề</p>
+                
+                {showLibrary && (
+                  <div className="mt-4 bg-gray-800/50 rounded-lg border border-gray-700 p-3 max-h-60 overflow-y-auto">
+                    <h3 className="text-xs font-bold text-gray-400 mb-2 uppercase">Video gốc đã tải</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {files.filter(f => f.tag === 'gốc').length === 0 && <p className="text-xs text-gray-500 italic">Chưa có video gốc nào.</p>}
+                      {files.filter(f => f.tag === 'gốc').map(file => (
+                        <div key={file.name} className="flex items-center justify-between bg-gray-900 border border-gray-700 p-2 rounded-lg hover:border-indigo-500 transition-colors">
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs text-white font-medium truncate">{file.name}</span>
+                            <span className="text-[10px] text-gray-500">{file.size_mb} MB</span>
+                          </div>
+                          <button onClick={() => { setDownloadedVideo({ ...file, id: file.name.replace('.mp4', '') }); setStep(2); setShowLibrary(false); }}
+                            className="bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white px-3 py-1 rounded text-[10px] font-bold transition-all uppercase">
+                            Chọn video này
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-500 mt-2">Dán URL để tải mới hoặc chọn từ thư viện để xử lý lại các video đã tải sẵn.</p>
               </section>
             )}
 
@@ -255,19 +313,49 @@ export default function App() {
                         className="w-full"
                         style={{ maxHeight: '500px' }}
                       />
-                      {/* Subtitle cover overlay */}
-                      {addSubtitle && subMode === 'blackbox' && (
-                        <div 
-                          className="absolute border-2 border-amber-500 bg-black/70 flex items-center justify-center text-amber-400 text-[10px] pointer-events-none"
-                          style={{
-                            left: `${subCoverX}%`,
-                            top: `${subCoverY}%`,
-                            width: `${subCoverW}%`,
-                            height: `${subCoverH}%`
-                          }}
-                        >
-                          ▓ vùng che sub
-                        </div>
+                      {/* Subtitle Preview Overlay */}
+                      {addSubtitle && (
+                        <>
+                          {/* THE BOX (Cover/Blur) */}
+                          {subMode === 'blackbox' && (
+                            <div 
+                              className={`absolute border-2 border-amber-500/50 flex items-center justify-center pointer-events-none transition-all ${
+                                coverStyle === 'blur' ? 'backdrop-blur-lg bg-white/10' : 'bg-black/80'
+                              }`}
+                              style={{
+                                left: `${subCoverX}%`,
+                                top: `${subCoverY}%`,
+                                width: `${subCoverW}%`,
+                                height: `${subCoverH}%`
+                              }}
+                            >
+                              {subPosition === 'cover' && (
+                                <div className="text-white font-bold text-center leading-tight whitespace-pre-wrap px-1"
+                                     style={{ 
+                                       fontSize: `${Math.max(10, subFontSize * 1.2)}px`,
+                                       textShadow: '2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 10px rgba(0,0,0,1)'
+                                     }}>
+                                  <div className="text-[8px] opacity-50 uppercase tracking-tighter mb-0.5">[Render Example]</div>
+                                  {subText || "Nội dung sub sẽ hiện ở đây"}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* BOTTOM TEXT PREVIEW */}
+                          {subPosition === 'bottom' && (
+                            <div className="absolute left-0 right-0 flex justify-center pointer-events-none"
+                                 style={{ bottom: `${subMarginV}%` }}>
+                              <div className="text-white font-bold text-center leading-tight whitespace-pre-wrap px-4"
+                                   style={{ 
+                                     fontSize: `${Math.max(10, subFontSize * 1.2)}px`,
+                                     textShadow: '1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 5px rgba(0,0,0,1)'
+                                   }}>
+                                {subText || "Vị trí chữ (Bottom)"}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
 
@@ -317,7 +405,29 @@ export default function App() {
 
                             {subMode === 'blackbox' ? (
                               <div className="bg-gray-900/50 rounded-lg p-3 space-y-2">
-                                <p className="text-xs text-amber-400 font-medium">Kéo slider chỉnh vùng che trực tiếp trên video ←</p>
+                                {/* Cover style: black vs blur */}
+                                <div className="flex bg-gray-800 rounded-lg p-1 gap-1">
+                                  <button onClick={() => setCoverStyle('black')}
+                                    className={`flex-1 py-1 text-xs font-medium rounded-md transition-colors ${coverStyle === 'black' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                    ■ Đen toàn phần
+                                  </button>
+                                  <button onClick={() => setCoverStyle('blur')}
+                                    className={`flex-1 py-1 text-xs font-medium rounded-md transition-colors ${coverStyle === 'blur' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                    ◉ Làm mờ (Blur)
+                                  </button>
+                                </div>
+                                {/* Sub position: cover vs bottom */}
+                                <div className="flex bg-gray-800 rounded-lg p-1 gap-1">
+                                  <button onClick={() => setSubPosition('cover')}
+                                    className={`flex-1 py-1 text-xs font-medium rounded-md transition-colors ${subPosition === 'cover' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                    ↕ Sub trong vùng che
+                                  </button>
+                                  <button onClick={() => setSubPosition('bottom')}
+                                    className={`flex-1 py-1 text-xs font-medium rounded-md transition-colors ${subPosition === 'bottom' ? 'bg-green-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+                                    ↓ Sub ở đáy video
+                                  </button>
+                                </div>
+                                <p className="text-xs text-amber-400 font-medium">Kéo slider chỉnh vùng che ↓</p>
                                 {[
                                   ['X (trái)', subCoverX, setSubCoverX, 0, 50],
                                   ['Y (trên)', subCoverY, setSubCoverY, 30, 95],
@@ -350,7 +460,7 @@ export default function App() {
                             <textarea
                               className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:ring-2 focus:ring-amber-500 focus:outline-none"
                               rows={2}
-                              placeholder="Nhập nội dung phụ đề mới (tách câu bằng dấu chấm)..."
+                              placeholder="Nhập nội dung phụ đề...&#10;Gợi ý: Tách câu bằng dấu chấm để tự căn giờ.&#10;Hoặc dùng định dạng: '2-5 | Nội dung' để chỉnh giây chính xác."
                               value={subText} onChange={e => setSubText(e.target.value)}
                             />
 
@@ -443,6 +553,66 @@ export default function App() {
                 </section>
               </>
             )}
+            
+            {/* ==================== STEP 3: RESULT ==================== */}
+            {step === 3 && processedVideo && (
+              <section className="bg-gray-900 rounded-2xl border-2 border-green-500/30 overflow-hidden shadow-2xl shadow-green-500/10">
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-green-600 p-2 rounded-lg">
+                        <CheckCircle className="w-5 h-5 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-white leading-none">Xử lý thành công!</h2>
+                        <p className="text-xs text-gray-400 mt-1">Video đã sẵn sàng để đăng tải</p>
+                      </div>
+                    </div>
+                    <button onClick={handleNewVideo} 
+                      className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg border border-gray-700 transition-colors">
+                      Làm video mới →
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-black rounded-xl overflow-hidden shadow-inner border border-gray-800">
+                      <video 
+                        key={processedVideo}
+                        src={processedVideo} 
+                        controls 
+                        autoPlay
+                        className="w-full"
+                        style={{ maxHeight: '500px' }}
+                      />
+                    </div>
+                    
+                    <div className="space-y-4 flex flex-col justify-center">
+                      <div className="bg-gray-800/50 rounded-xl p-5 border border-gray-800">
+                        <h3 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+                          <Download className="w-4 h-4 text-green-400" /> Tải về máy
+                        </h3>
+                        <p className="text-xs text-gray-400 mb-4 line-clamp-2">
+                          File: {processedVideo.split('/').pop()}
+                        </p>
+                        <a 
+                          href={processedVideo} 
+                          download 
+                          className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-bold transition-all shadow-lg shadow-indigo-500/20"
+                        >
+                          TẢI VIDEO (.MP4)
+                        </a>
+                      </div>
+
+                      <div className="bg-amber-900/20 rounded-xl p-4 border border-amber-500/20">
+                        <p className="text-[11px] text-amber-300 leading-relaxed italic">
+                          💡 Tip: Bạn có thể click chuột phải vào video và chọn "Save video as..." nếu nút tải về không hoạt động trên trình duyệt hiện tại.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* Task Progress */}
             {tasks.length > 0 && (
@@ -478,38 +648,109 @@ export default function App() {
           </>
         )}
 
-        {/* ==================== FILES TAB ==================== */}
         {activeTab === 'files' && (
-          <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white">📁 Video trong Storage ({files.length})</h2>
+          <section className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden shadow-2xl">
+            <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-5 h-5 text-indigo-400" />
+                <h2 className="text-sm font-bold text-white">Thư viện Video ({files.length})</h2>
+              </div>
               <button onClick={fetchFiles} disabled={loadingFiles}
-                className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 border border-gray-700">
-                <RefreshCw className={`w-3 h-3 ${loadingFiles ? 'animate-spin' : ''}`} />Làm mới
+                className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 border border-gray-700 transition-all">
+                <RefreshCw className={`w-3 h-3 ${loadingFiles ? 'animate-spin' : ''}`} /> Làm mới danh sách
               </button>
             </div>
+            
             {files.length === 0 ? (
-              <div className="p-8 text-center text-gray-500 text-sm">Chưa có video nào.</div>
+              <div className="p-12 text-center">
+                <Film className="w-12 h-12 text-gray-800 mx-auto mb-3" />
+                <p className="text-gray-500 text-sm">Chưa có video nào trong bộ nhớ.</p>
+              </div>
             ) : (
-              <div className="divide-y divide-gray-800">
-                {files.map(file => (
-                  <div key={file.name} className="p-3 flex items-center gap-4 hover:bg-gray-800/50">
-                    <Film className="w-4 h-4 text-gray-500" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-white truncate">{file.name}</p>
-                      <p className="text-xs text-gray-500">{file.size_mb} MB</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      file.tag === 'anti-scan' ? 'bg-blue-900/50 text-blue-300' :
-                      file.tag === 'voiceover' ? 'bg-purple-900/50 text-purple-300' :
-                      'bg-green-900/50 text-green-300'
-                    }`}>{file.tag}</span>
-                    <a href={`${STORAGE_BASE}/${file.name}`} download
-                      className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-lg">
-                      Tải về
-                    </a>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-gray-950/50 text-[11px] uppercase tracking-wider text-gray-500 font-bold">
+                    <tr>
+                      <th className="px-5 py-3 border-b border-gray-800">Tên Video / ID</th>
+                      <th className="px-5 py-3 border-b border-gray-800">Phân loại</th>
+                      <th className="px-5 py-3 border-b border-gray-800">Dung lượng</th>
+                      <th className="px-5 py-3 border-b border-gray-800 text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/50">
+                    {files.map(file => {
+                      const isVoiceover = file.name.includes('_voiceover');
+                      const isTransformed = file.name.includes('_transformed') && !isVoiceover;
+                      const isOriginal = !isVoiceover && !isTransformed;
+
+                      return (
+                        <tr key={file.name} className="hover:bg-gray-800/30 transition-colors group">
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-2 rounded-lg ${
+                                isOriginal ? 'bg-gray-800 text-gray-400' :
+                                isTransformed ? 'bg-blue-900/30 text-blue-400' :
+                                'bg-purple-900/30 text-purple-400'
+                              }`}>
+                                <Film className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-200 truncate max-w-[200px]" title={file.name}>
+                                  {file.name}
+                                </p>
+                                <p className="text-[10px] text-gray-500 font-mono mt-0.5">MP4 Format</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            {isOriginal && <span className="text-[10px] px-2 py-0.5 rounded-md bg-gray-800 text-gray-400 border border-gray-700 uppercase font-bold">Gốc</span>}
+                            {isTransformed && <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-900/40 text-blue-300 border border-blue-800/50 uppercase font-bold">Anti-scan + Sub</span>}
+                            {isVoiceover && <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-900/40 text-purple-300 border border-purple-800/50 uppercase font-bold">Lồng tiếng AI</span>}
+                          </td>
+                          <td className="px-5 py-4 text-xs text-gray-500 font-mono">
+                            {file.size_mb} MB
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button 
+                                onClick={() => {
+                                  if (isOriginal) {
+                                    setDownloadedVideo({ ...file, id: file.name.replace('.mp4', '') });
+                                    setStep(2);
+                                    setActiveTab('main');
+                                  } else {
+                                    setProcessedVideo(`${STORAGE_BASE}/${file.name}`);
+                                    setStep(3);
+                                    setActiveTab('main');
+                                  }
+                                }}
+                                className={`p-2 rounded-lg transition-all ${
+                                  isOriginal ? 'text-green-400 hover:bg-green-900/40' : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                                }`}
+                                title={isOriginal ? "Cấu hình & Xử lý" : "Xem trước"}
+                              >
+                                <Play className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={() => handleDelete(file.name)}
+                                className="p-2 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-lg transition-all"
+                                title="Xóa video"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                              <a href={`${STORAGE_BASE}/${file.name}`} download
+                                className="p-2 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-lg transition-all"
+                                title="Tải về máy"
+                              >
+                                <Download className="w-4 h-4" />
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>

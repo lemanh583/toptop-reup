@@ -15,6 +15,11 @@ def download_tiktok_video(self, url: str, cookie: str = None):
         
     file_path = os.path.join(settings.STORAGE_PATH, f"{video_id}.mp4")
     
+    # Rule: Nếu video đã download rồi thì không tải lại nữa
+    if os.path.exists(file_path) and os.path.getsize(file_path) > 10000:
+        self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Sử dụng video gốc đã có sẵn.', 'video_id': video_id})
+        return {"message": "Success", "file_path": file_path, "video_id": video_id}
+
     self.update_state(state='PROGRESS', meta={'progress': 30, 'status': 'Đang kết nối API Port 5555 (DouK-Downloader)...'})
     
     import httpx
@@ -123,7 +128,7 @@ def download_tiktok_video(self, url: str, cookie: str = None):
         self.update_state(state='ERROR_PROGRESS', meta={'progress': 0, 'status': f'Lỗi: {str(e)}'})
         raise e
         
-    self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Tải thành công!'})
+    self.update_state(state='SUCCESS', meta={'progress': 100, 'status': 'Tải thành công!', 'video_id': detail_id or video_id})
     return {"message": "Success", "file_path": file_path, "video_id": detail_id or video_id}
 
 @celery_app.task(bind=True, name="transform_video_task")
@@ -164,25 +169,14 @@ def transform_video_task(self, previous_result=None, transform_configs: dict = N
         sub_input = output_file
         sub_output = os.path.join(settings.STORAGE_PATH, f"{video_id}_subtitled.mp4")
         
-        # Build subtitle configs
-        sub_configs = {}
-        sub_mode = transform_configs.get("sub_mode", "blackbox")
-        sub_configs["sub_mode"] = sub_mode
-        if sub_mode == "blackbox":
-            sub_configs["sub_cover_x"] = transform_configs.get("sub_cover_x", 10)
-            sub_configs["sub_cover_y"] = transform_configs.get("sub_cover_y", 80)
-            sub_configs["sub_cover_w"] = transform_configs.get("sub_cover_w", 80)
-            sub_configs["sub_cover_h"] = transform_configs.get("sub_cover_h", 20)
-        else:
-            sub_configs["sub_style"] = transform_configs.get("sub_style", "outline")
-
-        if transform_configs.get("new_subtitle_text"):
-            sub_configs["new_subtitle_text"] = transform_configs["new_subtitle_text"]
-        if transform_configs.get("srt_file_path"):
-            sub_configs["srt_file_path"] = transform_configs["srt_file_path"]
-        sub_configs["sub_font_size"] = transform_configs.get("sub_font_size", 12)
-        sub_configs["sub_margin_v"] = transform_configs.get("sub_margin_v", 20)
-
+        # Build subtitle configs - take all from transform_configs as base
+        sub_configs = dict(transform_configs)
+        
+        # Ensure fallback defaults for new fields
+        if "cover_style" not in sub_configs:
+            sub_configs["cover_style"] = "black"
+        if "sub_position" not in sub_configs:
+            sub_configs["sub_position"] = "cover"
         
         success = transformer.apply_subtitle_overlay(sub_input, sub_output, sub_configs)
         if success and os.path.exists(sub_output):

@@ -4,6 +4,8 @@ import tempfile
 import subprocess
 import json
 import ffmpeg
+import datetime
+import traceback
 
 class VideoTransformer:
     def __init__(self):
@@ -31,14 +33,31 @@ class VideoTransformer:
             )
             data = json.loads(result.stdout)
             video_stream = next(s for s in data["streams"] if s["codec_type"] == "video")
+            
+            width = int(video_stream["width"])
+            height = int(video_stream["height"])
+            
+            # Detect rotation (often -90 or 90 for mobile videos)
+            rotate = 0
+            if "tags" in video_stream and "rotate" in video_stream["tags"]:
+                rotate = int(video_stream["tags"]["rotate"])
+            elif "side_data_list" in video_stream:
+                for sd in video_stream["side_data_list"]:
+                    if sd.get("side_data_type") == "Display Matrix":
+                        rotate = int(sd.get("rotation", 0))
+            
+            if rotate in [90, 270, -90, -270]:
+                width, height = height, width
+                
             return {
-                "width": int(video_stream["width"]),
-                "height": int(video_stream["height"]),
+                "width": width,
+                "height": height,
                 "duration": float(data["format"].get("duration", 0)),
-                "fps": video_stream.get("r_frame_rate", "30/1")
+                "fps": video_stream.get("r_frame_rate", "30/1"),
+                "rotate": rotate
             }
         except Exception:
-            return {"width": 720, "height": 1280, "duration": 30.0, "fps": "30/1"}
+            return {"width": 720, "height": 1280, "duration": 30.0, "fps": "30/1", "rotate": 0}
 
     def extract_frame(self, video_path: str, output_path: str, time_sec: float = 3.0):
         """Extract a single frame from video for preview."""
@@ -51,23 +70,216 @@ class VideoTransformer:
         return result.returncode == 0
 
     def _generate_srt_from_text(self, text: str, duration: float, output_path: str):
-        """Auto-split plain text into evenly-timed SRT segments."""
-        # Split by newlines or periods, filter empty
-        segments = [s.strip() for s in text.replace('\n', '. ').split('.') if s.strip()]
-        if not segments:
-            segments = [text.strip()]
+        """Hybrid SRT generator: respects manual 'S-E | Text' and auto-fills gaps with plain text."""
+        import re
+        manual_pattern = re.compile(r"^([\d\.\:]+)\s*-\s*([\d\.\:]+)\s*\|\s*(.*)$")
         
-        n = len(segments)
-        seg_duration = duration / n
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        fixed_segments = []
+        plain_texts = []
+
+        def parse_time(t_str: str) -> float | None:
+            try:
+                if ':' in t_str:
+                    parts = t_str.split(':')
+                    return float(parts[0]) * 60 + float(parts[1])
+                return float(t_str)
+            except Exception:
+                return None
+
+        for line in lines:
+            match = manual_pattern.match(line)
+            if match:
+                s_val = parse_time(match.group(1))
+                e_val = parse_time(match.group(2))
+                txt = match.group(3)
+                if s_val is not None and e_val is not None:
+                    fixed_segments.append({'start': float(s_val), 'end': float(min(e_val, duration)), 'text': str(txt)})
+            else:
+                # Nếu không phải định dạng thủ công, coi là text tự động
+                # Tách tiếp theo dấu câu nếu dòng đó dài
+                subs = re.split(r'[.!?]', line)
+                for s in subs:
+                    if s.strip():
+                        plain_texts.append(s.strip())
+
+        # Sắp xếp các đoạn cố định
+        fixed_segments.sort(key=lambda x: x['start'])
         
+        # Tìm các khoảng trống (gaps)
+        gaps = []
+        last_end = 0.0
+        for seg in fixed_segments:
+            s_time = float(seg['start'])
+            if s_time > last_end + 0.1:
+                gaps.append({'start': last_end, 'end': s_time, 'duration': s_time - last_end})
+            last_end = max(last_end, float(seg['end']))
+        
+        v_dur = float(duration)
+        if last_end < v_dur - 0.1:
+            gaps.append({'start': last_end, 'end': v_dur, 'duration': v_dur - last_end})
+
+        final_segments = []
+        
+        # Nếu có text tự động, phân bổ vào các gaps
+        if plain_texts:
+            total_plain_chars = sum(len(t) for t in plain_texts)
+            total_gap_duration = sum(float(g['duration']) for g in gaps)
+            
+            if total_gap_duration > 0 and total_plain_chars > 0:
+                # Phân bổ text vào từng gap tỉ lệ theo độ dài gap
+                current_plain_idx = 0
+                for gap in gaps:
+                    g_start = float(gap['start'])
+                    g_dur = float(gap['duration'])
+                    
+                    # Text cho gap này = text chưa dùng
+                    if current_plain_idx >= len(plain_texts):
+                        break
+                    
+                    # Tính xem gap này chứa được bao nhiêu % text dựa theo thời gian gap / tổng thời gian trống
+                    gap_weight = g_dur / total_gap_duration
+                    gap_char_target = float(total_plain_chars) * gap_weight
+                    
+                    # Lấy các câu cho đến khi gần bằng target chars
+                    gap_texts = []
+                    acc_chars = 0
+                    while current_plain_idx < len(plain_texts):
+                        t = plain_texts[current_plain_idx]
+                        if acc_chars > 0 and acc_chars + len(t) > gap_char_target * 1.3: # allow overflow
+                            break
+                        gap_texts.append(t)
+                        acc_chars += len(t)
+                        current_plain_idx += 1
+                    
+                    if gap_texts:
+                        # Phân bổ nội bộ gap này theo weight chars của chính gap_texts
+                        gap_acc_chars = float(sum(len(t) for t in gap_texts))
+                        curr_gap_start = g_start
+                        for t in gap_texts:
+                            t_weight = len(t) / gap_acc_chars
+                            t_dur = g_dur * t_weight
+                            final_segments.append({'start': curr_gap_start, 'end': curr_gap_start + t_dur, 'text': t})
+                            curr_gap_start += t_dur
+            else:
+                # Trưòng hợp không có gap nào (manual phủ kín) nhưng vẫn còn plain text
+                # Có thể append vào cuối nếu còn chỗ
+                pass
+        
+        # Gộp fixed và auto-timed, sắp xếp lại
+        final_segments.extend(fixed_segments)
+        final_segments.sort(key=lambda x: float(x['start']))
+
+        def format_ts(seconds):
+            h = int(seconds // 3600); m = int((seconds % 3600) // 60)
+            s = int(seconds % 60); ms = int((seconds % 1) * 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
         with open(output_path, "w", encoding="utf-8") as f:
-            for i, seg in enumerate(segments):
-                start = i * seg_duration
-                end = (i + 1) * seg_duration
-                # SRT timestamp format: HH:MM:SS,mmm
-                start_ts = f"{int(start//3600):02d}:{int((start%3600)//60):02d}:{int(start%60):02d},{int((start%1)*1000):03d}"
-                end_ts = f"{int(end//3600):02d}:{int((end%3600)//60):02d}:{int(end%60):02d},{int((end%1)*1000):03d}"
-                f.write(f"{i+1}\n{start_ts} --> {end_ts}\n{seg}\n\n")
+            for i, seg in enumerate(final_segments):
+                f.write(f"{i+1}\n{format_ts(seg['start'])} --> {format_ts(seg['end'])}\n{seg['text']}\n\n")
+
+    def _generate_ass_from_text(self, text: str, duration: float, output_path: str,
+                                 width: int, height: int, font_size: int,
+                                 margin_v: int, alignment: int = 2):
+        """Generate ASS subtitle file with PlayResX/PlayResY for pixel-accurate rendering."""
+        # Reuse SRT generator logic to get timed segments
+        import re
+        manual_pattern = re.compile(r"^([\d\.\:]+)\s*-\s*([\d\.\:]+)\s*\|\s*(.*)$")
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        fixed_segments = []
+        plain_texts = []
+
+        def parse_time(t_str: str):
+            try:
+                if ':' in t_str:
+                    parts = t_str.split(':')
+                    return float(parts[0]) * 60 + float(parts[1])
+                return float(t_str)
+            except Exception:
+                return None
+
+        for line in lines:
+            match = manual_pattern.match(line)
+            if match:
+                s_val = parse_time(match.group(1))
+                e_val = parse_time(match.group(2))
+                txt = match.group(3)
+                if s_val is not None and e_val is not None:
+                    fixed_segments.append({'start': float(s_val), 'end': float(min(e_val, duration)), 'text': str(txt)})
+            else:
+                subs = re.split(r'[.!?]', line)
+                for s in subs:
+                    if s.strip():
+                        plain_texts.append(s.strip())
+
+        fixed_segments.sort(key=lambda x: x['start'])
+        gaps = []
+        last_end = 0.0
+        for seg in fixed_segments:
+            s_time = float(seg['start'])
+            if s_time > last_end + 0.1:
+                gaps.append({'start': last_end, 'end': s_time, 'duration': s_time - last_end})
+            last_end = max(last_end, float(seg['end']))
+        v_dur = float(duration)
+        if last_end < v_dur - 0.1:
+            gaps.append({'start': last_end, 'end': v_dur, 'duration': v_dur - last_end})
+
+        final_segments = []
+        if plain_texts:
+            total_plain_chars = sum(len(t) for t in plain_texts)
+            total_gap_duration = sum(float(g['duration']) for g in gaps)
+            if total_gap_duration > 0 and total_plain_chars > 0:
+                current_plain_idx = 0
+                for gap in gaps:
+                    g_start = float(gap['start'])
+                    g_dur = float(gap['duration'])
+                    if current_plain_idx >= len(plain_texts):
+                        break
+                    gap_weight = g_dur / total_gap_duration
+                    gap_char_target = float(total_plain_chars) * gap_weight
+                    gap_texts = []
+                    acc_chars = 0
+                    while current_plain_idx < len(plain_texts):
+                        t = plain_texts[current_plain_idx]
+                        if acc_chars > 0 and acc_chars + len(t) > gap_char_target * 1.3:
+                            break
+                        gap_texts.append(t)
+                        acc_chars += len(t)
+                        current_plain_idx += 1
+                    if gap_texts:
+                        gap_acc_chars = float(sum(len(t) for t in gap_texts))
+                        curr_gap_start = g_start
+                        for t in gap_texts:
+                            t_weight = len(t) / gap_acc_chars
+                            t_dur = g_dur * t_weight
+                            final_segments.append({'start': curr_gap_start, 'end': curr_gap_start + t_dur, 'text': t})
+                            curr_gap_start += t_dur
+
+        final_segments.extend(fixed_segments)
+        final_segments.sort(key=lambda x: float(x['start']))
+
+        def fmt_ass_ts(seconds):
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            cs = int((seconds % 1) * 100)
+            return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("[Script Info]\n")
+            f.write("ScriptType: v4.00+\n")
+            f.write(f"PlayResX: {width}\n")
+            f.write(f"PlayResY: {height}\n")
+            f.write("WrapStyle: 0\n")
+            f.write("ScaledBorderAndShadow: yes\n\n")
+            f.write("[V4+ Styles]\n")
+            f.write("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
+            f.write(f"Style: Default,Ubuntu Sans,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,{alignment},20,20,{margin_v},1\n\n")
+            f.write("[Events]\n")
+            f.write("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+            for seg in final_segments:
+                f.write(f"Dialogue: 0,{fmt_ass_ts(seg['start'])},{fmt_ass_ts(seg['end'])},Default,,0,0,0,,{seg['text']}\n")
 
     def apply_basic_transform(self, input_path: str, output_path: str):
         try:
@@ -163,125 +375,142 @@ class VideoTransformer:
             return False
 
     def apply_subtitle_overlay(self, input_path: str, output_path: str, configs: dict):
-        """Combined subtitle pipeline with 2 modes.
-        
-        configs keys:
-          - sub_mode: str — 'blackbox' (A: drawbox + sub) or 'overlay' (B: sub only, no bg)
-          - sub_style: str — for overlay mode: 'outline' | 'shadow' | 'glass' (default 'outline')
-          - sub_cover_x/y/w/h: int — for blackbox mode: position/size as %
-          - new_subtitle_text: str — plain text to auto-split into SRT
-          - srt_file_path: str — path to an existing .srt file
-          - sub_font_size: int — font size (default 18)
-          - sub_margin_v: int — bottom margin in pixels (default 20)
         """
-        try:
-            vf_filters = []
-            sub_mode = configs.get("sub_mode", "blackbox")
-            
-            # Mode A: Black out old subtitle area
-            if sub_mode == "blackbox":
-                x_pct = configs.get("sub_cover_x", 10)
-                y_pct = configs.get("sub_cover_y", 80)
-                w_pct = configs.get("sub_cover_w", 80)
-                h_pct = configs.get("sub_cover_h", 20)
-                if y_pct and h_pct:
-                    vf_filters.append(
-                        f"drawbox=x=iw*{x_pct/100}:y=ih*{y_pct/100}:w=iw*{w_pct/100}:h=ih*{h_pct/100}:color=black:t=fill"
-                    )
-            
-            # Prepare SRT file
-            srt_path = configs.get("srt_file_path")
-            temp_srt = None
-            
-            if not srt_path and configs.get("new_subtitle_text"):
-                duration = self._get_video_duration(input_path)
-                temp_srt = tempfile.NamedTemporaryFile(suffix=".srt", delete=False, mode="w", encoding="utf-8")
-                temp_srt.close()
-                srt_path = temp_srt.name
-                self._generate_srt_from_text(configs["new_subtitle_text"], duration, srt_path)
-            
-            # Build subtitle style based on mode
-            if srt_path:
-                escaped_srt = srt_path.replace("\\", "\\\\").replace(":", "\\:")
-                font_size = configs.get("sub_font_size", 18)
-                margin_v = configs.get("sub_margin_v", 20)
-                sub_style = configs.get("sub_style", "outline")
-                
-                if sub_mode == "blackbox":
-                    # Mode A: chữ trắng viền đen nhẹ trên nền đen
-                    style = (
-                        f"FontSize={font_size},"
-                        f"PrimaryColour=&HFFFFFF&,"
-                        f"OutlineColour=&H000000&,"
-                        f"Outline=2,"
-                        f"BorderStyle=1,"
-                        f"Shadow=0,"
-                        f"MarginV={margin_v}"
-                    )
-                elif sub_style == "shadow":
-                    # Mode B - Shadow: chữ trắng + bóng đen đậm
-                    style = (
-                        f"FontSize={font_size},"
-                        f"PrimaryColour=&HFFFFFF&,"
-                        f"OutlineColour=&H000000&,"
-                        f"Outline=2,"
-                        f"BorderStyle=1,"
-                        f"Shadow=3,"
-                        f"BackColour=&H80000000&,"
-                        f"MarginV={margin_v}"
-                    )
-                elif sub_style == "glass":
-                    # Mode B - Glass: chữ trắng + hộp nền đen 50% trong suốt
-                    style = (
-                        f"FontSize={font_size},"
-                        f"PrimaryColour=&HFFFFFF&,"
-                        f"OutlineColour=&H40000000&,"
-                        f"Outline=0,"
-                        f"BorderStyle=4,"
-                        f"BackColour=&H80000000&,"
-                        f"Shadow=0,"
-                        f"MarginV={margin_v}"
-                    )
-                else:
-                    # Mode B - Outline (default): chữ trắng viền đen dày — nổi trên mọi nền
-                    style = (
-                        f"FontSize={font_size},"
-                        f"PrimaryColour=&HFFFFFF&,"
-                        f"OutlineColour=&H000000&,"
-                        f"Outline=3,"
-                        f"BorderStyle=1,"
-                        f"Shadow=1,"
-                        f"MarginV={margin_v}"
-                    )
-                
-                vf_filters.append(f"subtitles={escaped_srt}:force_style='{style}'")
+        Two-pass approach: 1. Cover area, 2. Burn subtitles.
+        """
+        def log_debug(msg):
+            with open("/tmp/transform_debug.log", "a") as f:
+                f.write(f"[{datetime.datetime.now().isoformat()}] {msg}\n")
 
-            
-            if not vf_filters:
-                return False
-            
-            # Combine all filters in one FFmpeg pass
-            vf_chain = ",".join(vf_filters)
-            cmd = [
-                "ffmpeg", "-nostdin", "-y", "-i", input_path,
-                "-vf", vf_chain,
-                "-c:a", "copy",
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # Cleanup temp file
-            if temp_srt and os.path.exists(temp_srt.name):
-                os.unlink(temp_srt.name)
-                
-            if result.returncode != 0:
-                print(f"Subtitle Overlay Error: {result.stderr[-500:]}")
-                return False
-                
-            return True
+        try:
+            log_debug(f"[OVERLAY_START] VIDEO={os.path.basename(input_path)} configs={configs}")
+
+            # 1. Config & Video Info
+            sub_mode = configs.get("sub_mode", "blackbox")
+            cover_style = configs.get("cover_style", "black")
+            sub_position = configs.get("sub_position", "cover")
+            need_cover = (sub_mode == "blackbox")
+
+            video_info = self.get_video_info(input_path)
+            height = video_info.get("height", 1280)
+            width = video_info.get("width", 720)
+
+            # 2. Pixel Calculations (Even numbers for x264)
+            x_pct = float(configs.get("sub_cover_x", 10))
+            y_pct = float(configs.get("sub_cover_y", 75))
+            w_pct = float(configs.get("sub_cover_w", 80))
+            h_pct = float(configs.get("sub_cover_h", 12))
+
+            x_px = int((width * x_pct / 100.0) // 2) * 2
+            y_px = int((height * y_pct / 100.0) // 2) * 2
+            w_px = int((width * w_pct / 100.0) // 2) * 2
+            h_px = int((height * h_pct / 100.0) // 2) * 2
+
+            # Safety Bounds
+            x_px = max(0, min(width - 4, x_px))
+            y_px = max(0, min(height - 4, y_px))
+            w_px = max(4, min(width - x_px, w_px))
+            h_px = max(4, min(height - y_px, h_px))
+
+            # 3. PASS 1: Apply Cover
+            intermediate = input_path
+            if need_cover:
+                intermediate = output_path + ".pass1.mp4"
+                if cover_style == "blur":
+                    vf = (
+                        f"[0:v]split[main][blur];"
+                        f"[blur]crop={w_px}:{h_px}:{x_px}:{y_px},boxblur=20:5[blurred];"
+                        f"[main][blurred]overlay={x_px}:{y_px}[out]"
+                    )
+                    cmd1 = [
+                        "ffmpeg", "-nostdin", "-y", "-i", input_path,
+                        "-filter_complex", vf,
+                        "-map", "[out]", "-map", "0:a?",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                        "-c:a", "copy", intermediate
+                    ]
+                else: # black
+                    cmd1 = [
+                        "ffmpeg", "-nostdin", "-y", "-i", input_path,
+                        "-vf", f"drawbox=x={x_px}:y={y_px}:w={w_px}:h={h_px}:color=black:t=fill",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                        "-c:a", "copy", intermediate
+                    ]
+
+                log_debug(f"EXEC CMD1: {' '.join(cmd1)}")
+                r1 = subprocess.run(cmd1, capture_output=True, text=True)
+                if r1.returncode != 0:
+                    log_debug(f"PASS 1 FAILED: {r1.stderr[-1000:]}")
+                    return False
+
+            # 4. PASS 2: Subtitles (using ASS for pixel-accurate rendering)
+            temp_ass = None
+            has_subtitle_text = configs.get("new_subtitle_text") or configs.get("srt_file_path")
+            if has_subtitle_text:
+                duration = video_info.get("duration", 30.0)
+                sub_font_size = int(configs.get("sub_font_size", 14))
+                sub_margin_v = int(configs.get("sub_margin_v", 20))
+
+                # Scale font: slider_value * height / 540
+                # e.g. slider=14 on 1920p → 14*1920/540 ≈ 50px (readable but not huge)
+                font_size = max(16, int(sub_font_size * height / 540.0))
+
+                if sub_position == "cover" and need_cover:
+                    cover_center = y_px + (h_px / 2.0)
+                    margin_v = max(0, int(height - cover_center))
+                    alignment = 2
+                else:
+                    # Bottom: slider as % of height
+                    margin_v = max(0, int(sub_margin_v * height / 100.0))
+                    alignment = 2
+
+                # Generate ASS file
+                temp_ass = tempfile.NamedTemporaryFile(suffix=".ass", delete=False, mode="w", encoding="utf-8")
+                temp_ass.close()
+                ass_path = temp_ass.name
+
+                sub_text = configs.get("new_subtitle_text", "")
+                self._generate_ass_from_text(
+                    sub_text, duration, ass_path,
+                    width, height, font_size, margin_v, alignment
+                )
+
+                escaped_ass = ass_path.replace("\\", "\\\\").replace(":", "\\:")
+                sub_vf = f"ass={escaped_ass}"
+                cmd2 = [
+                    "ffmpeg", "-nostdin", "-y", "-i", intermediate,
+                    "-vf", sub_vf,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                    "-c:a", "copy", output_path
+                ]
+
+                log_debug(f"EXEC CMD2: {' '.join(cmd2)}")
+                r2 = subprocess.run(cmd2, capture_output=True, text=True)
+
+                # Cleanup
+                if intermediate != input_path and os.path.exists(intermediate):
+                    os.unlink(intermediate)
+                if temp_ass and os.path.exists(temp_ass.name):
+                    os.unlink(temp_ass.name)
+
+                if r2.returncode != 0:
+                    log_debug(f"PASS 2 FAILED: {r2.stderr[-1000:]}")
+                    return False
+                return True
+
+
+            elif need_cover:
+                # No sub, only cover
+                if intermediate != output_path:
+                    os.rename(intermediate, output_path)
+                return True
+
+            return False
+
         except Exception as e:
-            print(f"Subtitle Overlay Error: {e}")
+            msg = f"OVERLAY_CRITICAL_ERROR: {e}\n{traceback.format_exc()}"
+            log_debug(msg)
+            print(msg)
             return False
 
 
