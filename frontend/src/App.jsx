@@ -51,6 +51,7 @@ export default function App() {
   // Files
   const [files, setFiles] = useState([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     axios.get(`${API_BASE}/voiceover/voices`)
@@ -86,7 +87,8 @@ export default function App() {
 
   // STEP 1: Download only
   const handleDownload = async () => {
-    if (!url) return;
+    if (!url || loading) return;
+    setLoading(true);
     try {
       const { data } = await axios.post(`${API_BASE}/download`, {
         url, cookie: cookie || undefined,
@@ -109,7 +111,11 @@ export default function App() {
         });
       });
       
-    } catch { alert('Lỗi gọi API!'); }
+    } catch { 
+      alert('Lỗi gọi API!'); 
+    } finally {
+      setLoading(false);
+    }
   };
 
   // STEP 2: Process (transform + sub + voiceover)
