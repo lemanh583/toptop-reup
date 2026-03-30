@@ -2,13 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Download, MonitorPlay, Mic, Loader2, CheckCircle, AlertTriangle, FolderOpen, RefreshCw, Film, Subtitles, Play, Settings, Trash2 } from 'lucide-react';
 
-const API_BASE = window.location.port === '5173' 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || (window.location.port === '5173' 
   ? `http://${window.location.hostname}:8000/api` 
-  : `${window.location.origin}/api`;
+  : `${window.location.origin}/api`);
 
-const STORAGE_BASE = window.location.port === '5173'
+const STORAGE_BASE = import.meta.env.VITE_STORAGE_BASE_URL || (window.location.port === '5173'
   ? `http://${window.location.hostname}:8000/storage`
-  : `${window.location.origin}/storage`;
+  : `${window.location.origin}/storage`);
 
 export default function App() {
   const [url, setUrl] = useState('');
