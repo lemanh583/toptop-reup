@@ -36,12 +36,34 @@ sudo apt install -y fonts-ubuntu
 # Kiểm tra: fc-list | grep -i "ubuntu"
 ```
 
-## 2. Clone và cài dependencies
+## 2. Clone và cài đặt
 
 ```bash
 # Clone repo
 git clone <YOUR_REPO_URL> tool-tiktok-v2
 cd tool-tiktok-v2
+
+# Tạo thư mục storage
+mkdir -p storage
+```
+
+## 3. Chạy ứng dụng bằng Docker Compose (Khuyên dùng)
+
+Đảm bảo bạn đã cài đặt Docker và Docker Compose. 
+
+Chỉ cần chạy lệnh sau để build và khởi động tất cả (Frontend, Backend API, Redis, Celery Worker):
+
+```bash
+docker compose up -d --build
+```
+
+Ứng dụng sẽ có sẵn tại:
+- **Frontend**: http://localhost:5173
+- **Backend API Docs**: http://localhost:8000/docs
+
+*Lưu ý: Mọi video tải về đều nằm trong thư mục `storage` ở máy thật của bạn.*
+
+## 3.1. Chạy ứng dụng thủ công (Không dùng Docker)
 
 # Backend - Python virtualenv
 python3 -m venv venv
