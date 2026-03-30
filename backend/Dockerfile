@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED 1
 # Cài đặt các gói hệ thống cần thiết (FFmpeg, libass, font chữ)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    fonts-ubuntu \
+    fonts-dejavu \
     wget \
     gnupg \
     && rm -rf /var/lib/apt/lists/*

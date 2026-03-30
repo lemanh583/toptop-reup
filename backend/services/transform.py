@@ -275,7 +275,7 @@ class VideoTransformer:
             f.write("ScaledBorderAndShadow: yes\n\n")
             f.write("[V4+ Styles]\n")
             f.write("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
-            f.write(f"Style: Default,Ubuntu Sans,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,{alignment},20,20,{margin_v},1\n\n")
+            f.write(f"Style: Default,DejaVu Sans,{font_size},&Hffffff,&H000000,&H000000,&H000000,0,0,0,0,100,100,0,0,1,2,1,{alignment},0,0,{margin_v},1\n\n")
             f.write("[Events]\n")
             f.write("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
             for seg in final_segments:
